@@ -1,0 +1,105 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstanceReplicaSet
+metadata:
+  name: petclinicreplicaset
+  namespace: test
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      demo: petclinic
+  template:
+    metadata:
+      name: petclinic
+      annotations:
+        vm.kubevirt.io/flavor: small
+        vm.kubevirt.io/os: fedora
+        vm.kubevirt.io/workload: server
+      creationTimestamp: null
+      labels:
+        kubevirt.io/domain: petclinic
+        kubevirt.io/size: small
+        network.kubevirt.io/headlessService: headless
+        demo: petclinic
+    spec:
+      architecture: amd64
+      domain:
+        cpu:
+          cores: 1
+          sockets: 4
+          threads: 1
+        devices:
+          disks:
+            - disk:
+                bus: virtio
+              name: containerdisk
+            - disk:
+                bus: virtio
+              name: cloudinitdisk
+          interfaces:
+            - masquerade: {}
+              model: virtio
+              name: default
+          rng: {}
+        features:
+          acpi: {}
+          smm:
+            enabled: true
+        firmware:
+          bootloader:
+            efi: {}
+        machine:
+          type: pc-q35-rhel9.4.0
+        memory:
+          guest: 16Gi
+        resources: {}
+      networks:
+        - name: default
+          pod: {}
+      terminationGracePeriodSeconds: 180
+      volumes:
+        - containerDisk:
+            image: quay.io/kubevirt/fedora-cloud-container-disk-demo
+          name: containerdisk
+        - cloudInitNoCloud:
+            userData: |-
+              #cloud-config
+              user: fedora
+              password: 1234
+              chpasswd: { expire: False }
+              write_files:
+                - path: /etc/systemd/system/php-demo.service
+                  owner: root:root
+                  permissions: '0644'
+                  content: |
+                    [Unit]
+                    Description=PHP Demo Web Server
+                    After=network.target
+
+                    [Service]
+                    Type=simple
+                    ExecStart=/usr/sbin/httpd -DFOREGROUND
+                    ExecReload=/bin/kill -HUP $MAINPID
+                    ExecStop=/bin/kill -WINCH $MAINPID
+                    PrivateTmp=true
+                    Restart=always
+                    RestartSec=5
+
+                    [Install]
+                    WantedBy=multi-user.target
+
+              bootcmd:
+                # Build the application
+                - |
+                  dnf install httpd php wget -y
+                  mkdir -p /var/www/html
+                  wget, -O, /var/www/html/index.php, https://raw.githubusercontent.com/sillihkram/OpenShift-php-Demo/refs/heads/master/index.php
+                  chown -R petclinic:petclinic /opt/spring-petclinic
+                  cd /opt/spring-petclinic/source
+                  sudo -u petclinic mvn package -DskipTests
+                  mkdir /opt/spring-petclinic/target
+                  mv target/*.jar /opt/spring-petclinic/target/petclinic.jar
+                  chown -R petclinic:petclinic /opt/spring-petclinic
+                  systemctl daemon-reload
+                  systemctl enable petclinic.service --now
+          name: cloudinitdisk

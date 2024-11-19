@@ -1,0 +1,69 @@
+  #cloud-config
+  packages:
+    - mysql-server
+  
+  runcmd:
+    # Start and enable MySQL service
+    - [ systemctl, start, mysqld ]
+    - [ systemctl, enable, mysqld ]
+  
+    # Secure MySQL installation and set root password
+    - |
+      echo -e "[mysqld]\nbind-address = 0.0.0.0" >> /etc/my.cnf
+      systemctl restart mysqld
+  
+    # Set up MySQL with a user and permissions for external access, and create a database
+    - |
+      mysql -u root <<-EOF
+      ALTER USER 'root'@'localhost' IDENTIFIED BY 'petclinic';
+      DELETE FROM mysql.user WHERE User='';
+      DROP DATABASE IF EXISTS test;
+      FLUSH PRIVILEGES;
+  
+      CREATE DATABASE petclinic;
+      CREATE USER 'petclinic'@'%' IDENTIFIED BY 'petclinic';
+      GRANT ALL PRIVILEGES ON petclinic.* TO 'petclinic'@'%';
+      FLUSH PRIVILEGES;
+      EOF
+
+
+####################
+  write_files:
+    - path: /etc/systemd/system/petclinic.service
+      owner: root:root
+      permissions: '0644'
+      content: |
+        [Unit]
+        Description=Spring Petclinic Application
+        After=network.target
+  
+        [Service]
+        User=petclinic
+        Group=petclinic
+        WorkingDirectory=/opt/spring-petclinic
+        ExecStart=/usr/bin/java -jar /opt/spring-petclinic/target/petclinic.jar
+        SuccessExitStatus=143
+        Restart=on-failure
+        RestartSec=10
+  
+        [Install]
+        WantedBy=multi-user.target
+  
+  bootcmd:
+    # Build the application
+    - |
+      dnf install git java-17-openjdk maven -y
+      useradd -r -m -d /opt/spring-petclinic -s /sbin/nologin petclinic
+      git clone https://github.com/redhat-developer-demos/spring-petclinic.git /opt/spring-petclinic/source
+      chown -R petclinic:petclinic /opt/spring-petclinic
+      cd /opt/spring-petclinic/source
+      sudo -u petclinic mvn package -DskipTests
+      mkdir /opt/spring-petclinic/target
+      mv target/*.jar /opt/spring-petclinic/target/petclinic.jar
+      chown -R petclinic:petclinic /opt/spring-petclinic
+      systemctl daemon-reload
+      systemctl enable petclinic.service --now
+
+
+
+
